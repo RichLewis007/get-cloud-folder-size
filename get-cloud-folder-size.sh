@@ -54,7 +54,7 @@ EXTRA_RCLONE_ARGS=()
 HISTORY_ACTIVE="0"
 HISTORY_WARNED="0"
 HISTORY_ENTRY_FILE=""
-MENU_COLOR="${MENU_COLOR:-0}"
+MENU_COLOR="${MENU_COLOR:-1}"
 # - rclone size works by listing objects and summing sizes.
 # --fast-list changes how rclone lists directories (including for rclone size). When a backend supports ListR, it can reduce API calls and speed up deep listings.
 # 
@@ -68,13 +68,12 @@ MENU_COLOR="${MENU_COLOR:-0}"
 ###############################################################################
 
 # Color constants
-COLOR_RESET="\033[0m"
-COLOR_BOLD="\033[1m"
-COLOR_ACCENT="\033[36m"
-COLOR_BLUE="\033[34m"
+COLOR_RESET=$'\033[0m'
+COLOR_BOLD=$'\033[1m'
+COLOR_ACCENT=$'\033[36m'
+COLOR_BLUE=$'\033[34m'
 COLOR_LABEL="${COLOR_BOLD}${COLOR_ACCENT}"
-COLOR_MENU="\033[33m"
-COLOR_MENU_LABEL="${COLOR_BOLD}${COLOR_MENU}"
+COLOR_MENU_LABEL="${COLOR_BOLD}"
 
 # Logging functions
 log_info() {
@@ -140,6 +139,15 @@ pick_option() {
   fi
 
   local ui_status="UI: fzf=$has_fzf gum=$has_gum"
+
+  if [[ "$has_fzf" == "0" ]]; then
+    local stripped_items=()
+    local item
+    for item in "${items[@]}"; do
+      stripped_items+=( "$(strip_ansi "$item")" )
+    done
+    items=( "${stripped_items[@]}" )
+  fi
 
   # Try fzf first (best experience)
   if [[ "$has_fzf" == "1" ]]; then
@@ -1005,8 +1013,10 @@ folder_menu() {
     choice=$(pick_option "${prompt_header}"$'\n'"${prompt_body}" "${display_options[@]}") || return
 
     local chosen_index=-1
+    local choice_no_ansi
+    choice_no_ansi="$(strip_ansi "$choice")"
     for ((i = 0; i < ${#display_options[@]}; i++)); do
-      if [[ "${display_options[$i]}" == "$choice" ]]; then
+      if [[ "$(strip_ansi "${display_options[$i]}")" == "$choice_no_ansi" ]]; then
         chosen_index=$i
         break
       fi
@@ -1168,8 +1178,10 @@ EOF
     choice=$(pick_option "${prompt_header}"$'\n'"${prompt_body}" "${display_options[@]}") || exit 0
 
     local chosen_index=-1
+    local choice_no_ansi
+    choice_no_ansi="$(strip_ansi "$choice")"
     for ((i = 0; i < ${#display_options[@]}; i++)); do
-      if [[ "${display_options[$i]}" == "$choice" ]]; then
+      if [[ "$(strip_ansi "${display_options[$i]}")" == "$choice_no_ansi" ]]; then
         chosen_index=$i
         break
       fi
