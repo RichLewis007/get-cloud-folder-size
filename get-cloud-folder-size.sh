@@ -57,6 +57,8 @@
 
 EXTRA_RCLONE_ARGS=()
 HISTORY_ACTIVE="0"
+HISTORY_WARNED="0"
+HISTORY_ENTRY_FILE=""
 # - rclone size works by listing objects and summing sizes.
 # --fast-list changes how rclone lists directories (including for rclone size). When a backend supports ListR, it can reduce API calls and speed up deep listings.
 # 
@@ -73,6 +75,7 @@ HISTORY_ACTIVE="0"
 COLOR_RESET="\033[0m"
 COLOR_BOLD="\033[1m"
 COLOR_ACCENT="\033[36m"
+COLOR_BLUE="\033[34m"
 COLOR_LABEL="${COLOR_BOLD}${COLOR_ACCENT}"
 
 # Logging functions
@@ -260,9 +263,9 @@ pause_any_key() {
   fi
   read -r -n 1 -s || true
   echo
-  if [[ "$HISTORY_ACTIVE" == "1" ]]; then
-    history_write_line ""
-  fi
+  # if [[ "$HISTORY_ACTIVE" == "1" ]]; then
+  #   history_write_line ""
+  # fi
 }
 
 require_rclone() {
@@ -359,24 +362,29 @@ strip_ansi() {
 history_start_entry() {
   local remote="$1"
   local folder="$2"
-  local log_file="$3"
-  local command_display="$4"
+  local command_display="$3"
   local ts
-  ts="$(date '+%Y-%m-%d %H:%M:%S')"
+  ts="$(date '+%Y-%m-%d %-I:%M %p')"
 
-  {
+  mkdir -p "$(dirname "$HISTORY_FILE")" 2>/dev/null || true
+
+  HISTORY_ENTRY_FILE="$(mktemp "${TMPDIR:-/tmp}/gcfs-history.XXXXXX")"
+
+  if ! {
     printf '\n---\n\n'
     printf '## %s\n\n' "$ts"
     printf -- '- Remote: %s\n' "$remote"
     printf -- '- Folder: %s\n' "$folder"
-    if [[ -n "$log_file" ]]; then
-      printf -- '- Log file: %s\n' "$log_file"
-    else
-      printf -- '- Log file: (disabled)\n'
-    fi
     printf -- '- Command: `%s`\n\n' "$command_display"
     printf '```\n'
-  } >> "$HISTORY_FILE"
+  } >> "$HISTORY_ENTRY_FILE" 2>/dev/null; then
+    HISTORY_ACTIVE="0"
+    if [[ "$HISTORY_WARNED" == "0" ]]; then
+      printf '⚠  WARNING: Unable to write history log: %s\n' "$HISTORY_FILE" >&2
+      HISTORY_WARNED="1"
+    fi
+    return
+  fi
   HISTORY_ACTIVE="1"
 }
 
@@ -384,15 +392,36 @@ history_write_line() {
   local line="$1"
   line="${line//$'\r'/}"
   line="$(strip_ansi "$line")"
-  printf '%s\n' "$line" >> "$HISTORY_FILE"
+  if [[ "$HISTORY_ACTIVE" == "1" ]]; then
+    printf '%s\n' "$line" >> "$HISTORY_ENTRY_FILE" 2>/dev/null || true
+  fi
 }
 
 history_end_entry() {
-  {
-    printf '```\n\n'
-    printf '---\n'
-  } >> "$HISTORY_FILE"
+  if [[ "$HISTORY_ACTIVE" == "1" ]]; then
+    {
+      printf '```\n\n'
+      printf '---\n'
+    } >> "$HISTORY_ENTRY_FILE" 2>/dev/null || true
+
+    local tmp_out
+    tmp_out="$(mktemp "${TMPDIR:-/tmp}/gcfs-history-out.XXXXXX")"
+    if [[ -s "$HISTORY_FILE" ]]; then
+      cat "$HISTORY_ENTRY_FILE" "$HISTORY_FILE" > "$tmp_out" 2>/dev/null || true
+    else
+      cat "$HISTORY_ENTRY_FILE" > "$tmp_out" 2>/dev/null || true
+    fi
+    if [[ -s "$tmp_out" ]]; then
+      mv "$tmp_out" "$HISTORY_FILE" 2>/dev/null || true
+    else
+      rm -f "$tmp_out" 2>/dev/null || true
+    fi
+  fi
   HISTORY_ACTIVE="0"
+  if [[ -n "$HISTORY_ENTRY_FILE" ]]; then
+    rm -f "$HISTORY_ENTRY_FILE" 2>/dev/null || true
+  fi
+  HISTORY_ENTRY_FILE=""
 }
 
 get_remote_type() {
@@ -618,7 +647,7 @@ clear_remote_size_data() {
 
 fetch_top_level_dirs() {
   local remote="$1"
-  rclone lsf -d --max-depth 1 "${remote}:" 2>/dev/null | sed '/^$/d; s:/$::'
+  rclone lsf --dirs-only --max-depth 1 "${remote}:" 2>/dev/null | sed '/^$/d; s:/$::'
 }
 
 ###############################################################################
@@ -698,21 +727,13 @@ run_size_for_folder() {
   local command_display
   command_display="$(printf '%q ' "${rclone_cmd[@]}")"
 
-  history_start_entry "$remote" "$folder" "$log_file" "$command_display"
+  history_start_entry "$remote" "$folder" "$command_display"
 
   echo
+  printf "%bRunning rclone to get the total size of all files within the selected cloud drive folder%b\n" "${COLOR_BOLD}${COLOR_BLUE}" "$COLOR_RESET"
+  history_write_line "Running rclone to get the total size of all files within the selected cloud drive folder"
   printf "%bSizing:%b %s\n" "$COLOR_LABEL" "$COLOR_RESET" "$target"
   history_write_line "Sizing: $target"
-  if [[ "$log_enabled" == "1" ]]; then
-    printf "%bLog file:%b %s\n" "$COLOR_LABEL" "$COLOR_RESET" "$log_file"
-    history_write_line "Log file: $log_file"
-  else
-    printf "%bLog file:%b (disabled)\n" "$COLOR_LABEL" "$COLOR_RESET"
-    history_write_line "Log file: (disabled)"
-  fi
-  echo
-  history_write_line ""
-
   printf "%bCommand:%b %s\n\n" "$COLOR_LABEL" "$COLOR_RESET" "$command_display"
   history_write_line "Command: $command_display"
   history_write_line ""

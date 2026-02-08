@@ -1,10 +1,10 @@
-# get-cloud-folder-size
+# Get Cloud Folder Size
 
 Interactive rclone folder size checker with TUI menus. Pick a remote, choose a
 top-level folder, and get live progress plus a final size summary. Caches
 results for quick re-display.
 
-> Get Cloud Folder Size - Version: 1.10
+> **Get Cloud Folder Size** - Version: 1.10  
 > Author: Rich Lewis - GitHub: @RichLewis007
 
 ## Features
@@ -75,11 +75,19 @@ FAST_LIST_MODE=auto   # auto|on|off
 
 You will see:
 
-- A `Sizing:` line and `Log file:` line.
+- A `Sizing:` line.
 - The exact `rclone size` command as it will be executed.
 - A live status line with listed count and elapsed time.
 - Final totals including bytes and rclone’s human-readable total size.
 - A Markdown history entry in `get-cloud-folder-size-history.md`.
+
+Note on units: rclone’s human-readable sizes may be shown in binary units
+(MiB/GiB) while other tools show decimal units (MB/GB). These differ by ~2.4%.
+For background, see:
+```
+https://simple.wikipedia.org/wiki/Mebibyte
+https://physics.nist.gov/cuu/Units/binary.html
+```
 
 ## Files
 
