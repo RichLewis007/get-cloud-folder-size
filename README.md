@@ -12,7 +12,6 @@ results for quick re-display.
 - Interactive menu (fzf/gum with bash fallback).
 - Live progress line: `Listed N,NNN` and `Elapsed time`.
 - Prints the exact `rclone size` command before running.
-- Optional logging to file (disabled by default).
 - History log in Markdown for each size run.
 - Cache of size results for faster re-display.
 - Backend-aware `--fast-list` behavior for Google Drive and OneDrive.
@@ -50,10 +49,8 @@ chmod +x get-cloud-folder-size.sh
 ### Environment variables
 
 ```bash
-LOG_DIR=./log
 SIZE_DATA_FILE=./get-cloud-folder-size-data.txt
 HISTORY_FILE=./get-cloud-folder-size-history.md
-RCLONE_SIZE_LOG=1
 RCLONE_SIZE_ARGS="--fast-list"
 FAST_LIST_MODE=auto   # auto|on|off
 ```
@@ -64,9 +61,7 @@ FAST_LIST_MODE=auto   # auto|on|off
 - `--fast-list` forces it on for all remotes.
 - `--no-fast-list` disables it and strips it from extra args.
 - OneDrive adds `--onedrive-delta` only when fast-list is enabled.
-- Logging is disabled by default.
-- Enable logging with `RCLONE_SIZE_LOG=1` to save full rclone output.
-- Terminal output is colorized; logs never contain color codes.
+- Terminal output is colorized.
 - Unknown CLI args are forwarded to `rclone size`.
 - Use `--` to force pass-through mode: `./get-cloud-folder-size.sh -- --tpslimit 10`.
 - The history log records all terminal output after folder selection.
@@ -93,7 +88,6 @@ https://physics.nist.gov/cuu/Units/binary.html
 
 - `get-cloud-folder-size.sh` — main script
 - `get-cloud-folder-size-data.txt` — cache (generated)
-- `log/` — optional logs when `RCLONE_SIZE_LOG=1` (generated)
 - `get-cloud-folder-size-history.md` — Markdown history log (generated)
 
 ## Troubleshooting

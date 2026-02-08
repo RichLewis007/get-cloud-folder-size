@@ -13,7 +13,6 @@
 #
 # Usage:
 # - ./get-cloud-folder-size.sh
-# - RCLONE_SIZE_LOG=1 ./get-cloud-folder-size.sh
 # - RCLONE_SIZE_ARGS="--fast-list" ./get-cloud-folder-size.sh
 # - ./get-cloud-folder-size.sh --fast-list
 # - ./get-cloud-folder-size.sh --no-fast-list
@@ -26,15 +25,12 @@
 #
 # Outputs:
 # - Terminal TUI + live progress (Listed N,NNN / Elapsed time)
-# - Optional log file when RCLONE_SIZE_LOG=1
 # - Cache file with folder sizes (bytes)
 # - History log in Markdown (get-cloud-folder-size-history.md)
 #
 # Config (env vars):
-# - LOG_DIR: log directory (default: ./log)
 # - SIZE_DATA_FILE: cache file (default: ./get-cloud-folder-size-data.txt)
 # - HISTORY_FILE: history log file (default: ./get-cloud-folder-size-history.md)
-# - RCLONE_SIZE_LOG: write rclone output to log file (default: 0)
 # - RCLONE_SIZE_ARGS: extra args appended to `rclone size`
 # - FAST_LIST_MODE: auto|on|off (default: auto)
 # - DEBUG_UI_NO_FZF: force-disable fzf UI (default: unset)
@@ -49,7 +45,6 @@
 #
 # Notes:
 # - Live updates use --stats 1s for smoother progress.
-# - Logging is disabled by default; enable only when needed.
 # - Google Drive defaults to --fast-list in auto mode.
 # - OneDrive uses --onedrive-delta only when --fast-list is enabled.
 # - Unknown args are passed through to rclone size; use -- to force pass-through.
@@ -232,7 +227,6 @@ pick_option() {
 ###############################################################################
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${LOG_DIR:-"$SCRIPT_DIR/log"}"
 SIZE_DATA_FILE="${SIZE_DATA_FILE:-"$SCRIPT_DIR/get-cloud-folder-size-data.txt"}"
 HISTORY_FILE="${HISTORY_FILE:-"$SCRIPT_DIR/get-cloud-folder-size-history.md"}"
 
@@ -250,7 +244,6 @@ SIZE_BYTES_VALUES=()
 LAST_TOTAL_BYTES=""
 LAST_TOTAL_TIME=""
 LAST_TOTAL_OBJECTS=""
-LAST_LOG_FILE=""
 
 ###############################################################################
 # Helpers
@@ -273,14 +266,6 @@ require_rclone() {
     log_error "rclone not found in PATH."
     exit 1
   fi
-}
-
-sanitize_for_filename() {
-  local s="$1"
-  s="${s//\//_}"
-  s="${s//:/_}"
-  s="${s// /_}"
-  echo "$s"
 }
 
 clear_screen() {
@@ -659,25 +644,11 @@ run_size_for_folder() {
   local folder="$2"
   local pause_after="${3:-1}"
   local target="${remote}:${folder}"
-  local log_enabled="${RCLONE_SIZE_LOG:-0}"
   local fast_list_mode="${FAST_LIST_MODE:-auto}"
-
-  mkdir -p "$LOG_DIR" 2>/dev/null || true
-
-  local ts
-  ts=$(date +%Y-%m-%d__%I-%M-%S-%p)
-
-  local safe_target
-  safe_target=$(sanitize_for_filename "$target")
-  local log_file=""
-  if [[ "$log_enabled" == "1" ]]; then
-    log_file="$LOG_DIR/rclone-size-${safe_target}-${ts}.log"
-  fi
 
   LAST_TOTAL_BYTES=""
   LAST_TOTAL_TIME=""
   LAST_TOTAL_OBJECTS=""
-  LAST_LOG_FILE="$log_file"
 
   # You can override defaults via RCLONE_SIZE_ARGS, e.g.
   # RCLONE_SIZE_ARGS="--fast-list" ./get-cloud-folder-size.sh
@@ -744,10 +715,6 @@ run_size_for_folder() {
     rclone_runner=(stdbuf -oL -eL "${rclone_cmd[@]}")
   fi
 
-  if [[ "$log_enabled" == "1" ]]; then
-    : > "$log_file"
-  fi
-
   local fifo
   fifo="$(mktemp -u "${TMPDIR:-/tmp}/rclone-size.XXXXXX")"
   mkfifo "$fifo"
@@ -761,10 +728,6 @@ run_size_for_folder() {
   local elapsed_line=""
 
   while IFS= read -r line; do
-      if [[ "$log_enabled" == "1" ]]; then
-        printf '%s\n' "$line" >> "$log_file"
-      fi
-
       if [[ "$line" =~ Listed[[:space:]]+([0-9][0-9,]*) ]]; then
         listed_count="${BASH_REMATCH[1]}"
         listed_count="${listed_count//,/}"
@@ -806,11 +769,7 @@ run_size_for_folder() {
   if [[ "$rclone_status" -ne 0 ]]; then
     echo
     echo
-    if [[ "$log_enabled" == "1" ]]; then
-      log_error "rclone size failed for ${target}. See log: ${log_file}"
-    else
-      log_error "rclone size failed for ${target}. (logging disabled)"
-    fi
+    log_error "rclone size failed for ${target}."
     echo
     if [[ "$pause_after" == "1" ]]; then
       pause_any_key
@@ -829,16 +788,6 @@ run_size_for_folder() {
   echo
 
   local total_time_line
-
-  if [[ -z "$total_line" && "$log_enabled" == "1" ]]; then
-    total_line=$(extract_last_line_matching "Total size:" "$log_file")
-  fi
-  if [[ -z "$objects_line" && "$log_enabled" == "1" ]]; then
-    objects_line=$(extract_last_line_matching "Total objects:" "$log_file")
-  fi
-  if [[ -z "$elapsed_line" && "$log_enabled" == "1" ]]; then
-    elapsed_line=$(extract_last_elapsed_time "$log_file")
-  fi
 
   if [[ -n "$elapsed_line" ]]; then
     total_time_line="$elapsed_line"
@@ -876,11 +825,7 @@ run_size_for_folder() {
     printf "Total time: %s\n" "$total_time_line"
     history_write_line "Total time: ${total_time_line}"
   else
-    if [[ "$log_enabled" == "1" ]]; then
-      log_warn "Total size not found in output. See log: ${log_file}"
-    else
-      log_warn "Total size not found in output. (logging disabled)"
-    fi
+    log_warn "Total size not found in output."
     history_write_line "Total size not found in output."
     printf "Total time: %s\n" "$total_time_line"
     history_write_line "Total time: ${total_time_line}"
