@@ -233,6 +233,7 @@ HISTORY_FILE="${HISTORY_FILE:-"$SCRIPT_DIR/get-cloud-folder-size-history.md"}"
 ACTION_RETURN="Return to remote list"
 ACTION_SIZE_ALL="Get size for all folders"
 ACTION_CLEAR="Clear size data for displayed remotes/folders"
+ACTION_SORT_SIZE="Sort by size (desc)"
 ACTION_QUIT="Quit"
 
 # Persistent cache arrays (parallel arrays for macOS bash compatibility)
@@ -250,6 +251,8 @@ LAST_TOTAL_OBJECTS=""
 ###############################################################################
 
 pause_any_key() {
+  # Drain any pending input so stray Enter doesn't auto-continue.
+  while read -r -n 1 -t 0; do :; done
   printf "Press any key to continue..."
   if [[ "$HISTORY_ACTIVE" == "1" ]]; then
     history_write_line "Press any key to continue..."
@@ -882,6 +885,7 @@ size_all_unsized_folders() {
 
 folder_menu() {
   local remote="$1"
+  local sort_by_size="${SORT_BY_SIZE_DEFAULT:-1}"
   while true; do
     local dirs=()
     while IFS= read -r line; do
@@ -905,14 +909,46 @@ folder_menu() {
       fi
     done
 
+    local display_dirs=()
+    if [[ "$sort_by_size" == "1" ]]; then
+      local rows=()
+      local d bytes
+      for d in "${dirs[@]}"; do
+        bytes=$(get_cached_size_bytes "$remote" "$d")
+        if [[ -z "$bytes" ]]; then
+          bytes=-1
+        fi
+        rows+=( "${bytes}"$'\t'"${d}" )
+      done
+      IFS=$'\n' display_dirs=($(printf '%s\n' "${rows[@]}" | sort -t $'\t' -k1,1nr | cut -f2-)) || true
+      IFS=$' \t\n'
+    else
+      display_dirs=( "${dirs[@]}" )
+    fi
+
+    local display_name_len="$max_name_len"
+    local max_align_len="${SIZE_ALIGN_MAX_LEN:-20}"
+    if [[ "$display_name_len" -gt "$max_align_len" ]]; then
+      display_name_len="$max_align_len"
+    fi
+
     local options=()
     options+=( "$ACTION_RETURN" )
+    local sort_label="$ACTION_SORT_SIZE"
+    if [[ "$sort_by_size" == "1" ]]; then
+      sort_label="Sort by size (asc)"
+    fi
+    options+=( "$sort_label" )
 
-    for d in "${dirs[@]}"; do
+    for d in "${display_dirs[@]}"; do
       local size_display line
       size_display=$(get_cached_size_display "$remote" "$d")
       if [[ -n "$size_display" ]]; then
-        line=$(printf "%-*s  [%s]" "$max_name_len" "$d" "$size_display")
+        local name_display="$d"
+        if [[ ${#name_display} -gt "$display_name_len" ]]; then
+          name_display="${name_display:0:$display_name_len}"
+        fi
+        line=$(printf "%-*s  [%s]" "$display_name_len" "$name_display" "$size_display")
       else
         line="$d"
       fi
@@ -948,13 +984,23 @@ folder_menu() {
     fi
 
     local return_index=0
-    local first_folder_index=1
+    local sort_index=1
+    local first_folder_index=2
     local folder_count=${#dirs[@]}
     local size_all_index=$((first_folder_index + folder_count))
     local clear_index=$((size_all_index + 1))
 
     if (( chosen_index == return_index )); then
       return
+    fi
+
+    if (( chosen_index == sort_index )); then
+      if [[ "$sort_by_size" == "1" ]]; then
+        sort_by_size="0"
+      else
+        sort_by_size="1"
+      fi
+      continue
     fi
 
     if (( chosen_index == size_all_index )); then
@@ -979,7 +1025,7 @@ folder_menu() {
     fi
 
     local selected_folder_index=$((chosen_index - first_folder_index))
-    local selected_folder="${dirs[$selected_folder_index]}"
+    local selected_folder="${display_dirs[$selected_folder_index]}"
 
     run_size_for_folder "$remote" "$selected_folder" 1
     if [[ -n "$LAST_TOTAL_BYTES" ]]; then
