@@ -54,6 +54,7 @@ EXTRA_RCLONE_ARGS=()
 HISTORY_ACTIVE="0"
 HISTORY_WARNED="0"
 HISTORY_ENTRY_FILE=""
+MENU_COLOR="${MENU_COLOR:-0}"
 # - rclone size works by listing objects and summing sizes.
 # --fast-list changes how rclone lists directories (including for rclone size). When a backend supports ListR, it can reduce API calls and speed up deep listings.
 # 
@@ -72,6 +73,8 @@ COLOR_BOLD="\033[1m"
 COLOR_ACCENT="\033[36m"
 COLOR_BLUE="\033[34m"
 COLOR_LABEL="${COLOR_BOLD}${COLOR_ACCENT}"
+COLOR_MENU="\033[33m"
+COLOR_MENU_LABEL="${COLOR_BOLD}${COLOR_MENU}"
 
 # Logging functions
 log_info() {
@@ -127,13 +130,25 @@ pick_option() {
     prompt_line="$prompt"
   fi
 
-  # Try fzf first (best experience)
+  local has_fzf="0"
+  local has_gum="0"
   if [[ "${DEBUG_UI_NO_FZF:-}" != "1" ]] && command -v fzf >/dev/null 2>&1; then
+    has_fzf="1"
+  fi
+  if [[ "${DEBUG_UI_NO_GUM:-}" != "1" ]] && command -v gum >/dev/null 2>&1; then
+    has_gum="1"
+  fi
+
+  local ui_status="UI: fzf=$has_fzf gum=$has_gum"
+
+  # Try fzf first (best experience)
+  if [[ "$has_fzf" == "1" ]]; then
     local fzf_header="$header"
     local fzf_prompt="$prompt_line"
     if [[ -z "$fzf_prompt" ]]; then
       fzf_prompt="$fzf_header"
     fi
+    fzf_header="${fzf_header}  |  ${ui_status}  |  using: fzf"
 
     # Calculate height based on terminal size and number of items
     local term_height
@@ -152,6 +167,8 @@ pick_option() {
     fi
 
     printf '%s\n' "${items[@]}" | fzf \
+      --ansi \
+      --border=rounded \
       --header="$fzf_header" \
       --prompt="${fzf_prompt} " \
       --layout=reverse-list \
@@ -161,7 +178,7 @@ pick_option() {
   fi
 
   # Try gum second (modern alternative)
-  if [[ "${DEBUG_UI_NO_GUM:-}" != "1" ]] && command -v gum >/dev/null 2>&1; then
+  if [[ "$has_gum" == "1" ]]; then
     # Calculate height based on terminal size (leave room for header and padding)
     local term_height
     term_height=$(tput lines 2>/dev/null || echo "24")
@@ -175,7 +192,12 @@ pick_option() {
       gum_height=$item_count
     fi
 
-    printf '%s\n' "${items[@]}" | gum choose --header="$header" --height="$gum_height" --cursor=">"
+    local gum_items=()
+    local item
+    for item in "${items[@]}"; do
+      gum_items+=( "$(strip_ansi "$item")" )
+    done
+    printf '%s\n' "${gum_items[@]}" | gum choose --header="${header}  |  ${ui_status}  |  using: gum" --height="$gum_height" --cursor=">" --border
     return $?
   fi
 
@@ -186,19 +208,22 @@ pick_option() {
   local quit_index=-1
   local item i=0
   for item in "${items[@]}"; do
+    local item_no_ansi
+    item_no_ansi="$(strip_ansi "$item")"
     # Check if this is "0) Quit" or similar
-    if [[ "$item" =~ ^[[:space:]]*0\)[[:space:]]+Quit ]]; then
+    if [[ "$item_no_ansi" =~ ^[[:space:]]*0\)[[:space:]]+Quit ]]; then
       # Keep "0) Quit" as-is and remember its index
-      select_items+=( "$item" )
+      select_items+=( "$item_no_ansi" )
       quit_index=$i
     else
       # Remove leading number and ") " pattern (e.g., " 1) " or "1) ")
-      select_items+=( "${item#*[0-9]) }" )
+      select_items+=( "${item_no_ansi#*[0-9]) }" )
     fi
     i=$((i + 1))
   done
 
-  echo "$prompt" >&2
+  echo "${prompt}" >&2
+  echo "${ui_status}  |  using: select" >&2
   echo "" >&2
   select choice in "${select_items[@]}"; do
     # Handle "0" input specially for Quit option
@@ -886,6 +911,10 @@ size_all_unsized_folders() {
 folder_menu() {
   local remote="$1"
   local sort_by_size="${SORT_BY_SIZE_DEFAULT:-1}"
+  local menu_color_enabled="0"
+  if [[ "$MENU_COLOR" == "1" && "${DEBUG_UI_NO_FZF:-}" != "1" ]] && command -v fzf >/dev/null 2>&1; then
+    menu_color_enabled="1"
+  fi
   while true; do
     local dirs=()
     while IFS= read -r line; do
@@ -962,7 +991,11 @@ folder_menu() {
     local option_count=${#options[@]}
     local i
     for ((i = 0; i < option_count; i++)); do
-      display_options+=( "$(printf '%2d) %s' $((i + 1)) "${options[$i]}")" )
+      local label="${options[$i]}"
+      if [[ "$menu_color_enabled" == "1" && ( "$label" == "$ACTION_RETURN" || "$label" == "$ACTION_SORT_SIZE" || "$label" == "$ACTION_SIZE_ALL" || "$label" == "$ACTION_CLEAR" || "$label" == "Sort by size (asc)" ) ]]; then
+        label="${COLOR_MENU_LABEL}${label}${COLOR_RESET}"
+      fi
+      display_options+=( "$(printf '%2d) %s' $((i + 1)) "$label")" )
     done
 
     local prompt_header="[REMOTE: ${remote}]"
@@ -1039,6 +1072,10 @@ main() {
   local arg
   local passthrough=0
   EXTRA_RCLONE_ARGS=()
+  local menu_color_enabled="0"
+  if [[ "$MENU_COLOR" == "1" && "${DEBUG_UI_NO_FZF:-}" != "1" ]] && command -v fzf >/dev/null 2>&1; then
+    menu_color_enabled="1"
+  fi
   for arg in "$@"; do
     if [[ "$passthrough" == "1" ]]; then
       EXTRA_RCLONE_ARGS+=( "$arg" )
@@ -1112,9 +1149,17 @@ EOF
     local remote_count=${#remotes[@]}
     local i
     for ((i = 0; i < ${#options[@]}; i++)); do
-      display_options+=( "$(printf '%2d) %s' $((i + 1)) "${options[$i]}")" )
+      local label="${options[$i]}"
+      if [[ "$menu_color_enabled" == "1" && "$label" == "$ACTION_CLEAR" ]]; then
+        label="${COLOR_MENU_LABEL}${label}${COLOR_RESET}"
+      fi
+      display_options+=( "$(printf '%2d) %s' $((i + 1)) "$label")" )
     done
-    display_options+=( "0) ${ACTION_QUIT}" )
+    if [[ "$menu_color_enabled" == "1" ]]; then
+      display_options+=( "0) ${COLOR_MENU_LABEL}${ACTION_QUIT}${COLOR_RESET}" )
+    else
+      display_options+=( "0) ${ACTION_QUIT}" )
+    fi
 
     local prompt_header="rclone folder sizes"
     local prompt_body="Select a remote"
